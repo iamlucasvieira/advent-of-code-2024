@@ -1,15 +1,17 @@
 advent_of_code::solution!(6);
-use itertools::Itertools;
 use std::collections::HashSet;
+use std::ops::{Add, Sub};
 
 pub fn part_one(input: &str) -> Option<u32> {
     let (map, mut start, mut direction) = parse_input(input);
-    let visited = walk(&map, &mut start, &mut direction);
+    let visited = walk_with_obstruction(&map, &mut start, &mut direction, None)?;
     Some(visited.len() as u32)
 }
 
 pub fn part_two(input: &str) -> Option<u32> {
-    None
+    let (map, start, direction) = parse_input(input);
+    let cyclic_paths = find_cyclic_paths(&map, start, direction);
+    Some(cyclic_paths as u32)
 }
 
 /// Tile in the map
@@ -29,7 +31,7 @@ impl Tile {
     }
 }
 
-#[derive(Debug, PartialEq, Hash, Eq)]
+#[derive(Debug, PartialEq, Hash, Eq, Clone, Copy)]
 struct Point {
     x: i32,
     y: i32,
@@ -37,48 +39,51 @@ struct Point {
 
 impl Point {
     fn new(x: i32, y: i32) -> Self {
-        Self { x, y }
+        Point { x, y }
     }
 
-    fn add(&self, other: &Self) -> Self {
-        Self {
-            x: self.x + other.x,
-            y: self.y + other.y,
-        }
-    }
-
-    fn remove(&self, other: &Self) -> Self {
-        Self {
-            x: self.x - other.x,
-            y: self.y - other.y,
-        }
-    }
-
+    /// Returns the tile at the given point from the map if valid.
     fn get_in_map<'a>(&self, map: &'a Map) -> Option<&'a Tile> {
-        let (x, y): (usize, usize) = [self.x, self.y]
-            .iter()
-            .map(|&n| n.try_into().expect(&format!("Invalid usize: {}", n)))
-            .collect_tuple()?;
-
-        map.get(y).and_then(|row| row.get(x))
+        if self.x < 0 || self.y < 0 {
+            return None;
+        }
+        let (x, y) = (self.x as usize, self.y as usize);
+        map.get(y)?.get(x)
     }
 
-    fn from_direction(c: &char) -> Self {
+    fn from_direction(c: char) -> Self {
         match c {
             '^' => Point::new(0, -1),
-            'V' => Point::new(0, 1),
+            'v' => Point::new(0, 1),
             '<' => Point::new(-1, 0),
             '>' => Point::new(1, 0),
-            _ => panic!("Not expected character!"),
+            _ => panic!("Unexpected direction character: {}", c),
         }
     }
 
-    fn rotate_cw(&mut self) {
-        (self.x, self.y) = (self.y, -self.x);
+    /// Rotates the point direction 90 degrees counter-clockwise.
+    fn rotate_ccw(&mut self) {
+        let (old_x, old_y) = (self.x, self.y);
+        self.x = -old_y;
+        self.y = old_x;
     }
+}
 
-    fn as_tuple(&self) -> (i32, i32) {
-        (self.x, self.y)
+/// Implement addition for Point to simplify arithmetic
+impl Add for Point {
+    type Output = Point;
+
+    fn add(self, other: Point) -> Point {
+        Point::new(self.x + other.x, self.y + other.y)
+    }
+}
+
+/// Implement subtraction for Point to simplify arithmetic
+impl Sub for Point {
+    type Output = Point;
+
+    fn sub(self, other: Point) -> Point {
+        Point::new(self.x - other.x, self.y - other.y)
     }
 }
 
@@ -94,9 +99,9 @@ fn parse_input(input: &str) -> (Map, Point, Point) {
             line.chars()
                 .enumerate()
                 .map(|(col, c)| match c {
-                    '^' | 'v' | '<' | '>' => {
+                    '^' | 'V' | '<' | '>' => {
                         start = Point::new(col as i32, row as i32);
-                        direction = Point::from_direction(&c);
+                        direction = Point::from_direction(c);
                         Tile::Empty
                     }
                     _ => Tile::from_char(c),
@@ -107,24 +112,61 @@ fn parse_input(input: &str) -> (Map, Point, Point) {
     (map, start, direction)
 }
 
-fn walk(map: &Map, position: &mut Point, direction: &mut Point) -> HashSet<(i32, i32)> {
-    let mut visited = HashSet::new();
+fn walk_with_obstruction(
+    map: &Map,
+    position: &mut Point,
+    direction: &mut Point,
+    obstruction: Option<Point>,
+) -> Option<HashSet<Point>> {
+    let mut visited_positions = HashSet::new();
+    let mut visited_states = HashSet::new();
 
     while let Some(&tile) = position.get_in_map(map) {
-        println!("{:?}, {:?}", position.as_tuple(), direction.as_tuple());
-        match tile {
+        let effective_tile = if Some(*position) == obstruction {
+            Tile::Wall
+        } else {
+            tile
+        };
+
+        match effective_tile {
             Tile::Empty => {
-                visited.insert(position.as_tuple());
+                visited_positions.insert(*position);
+
+                // Check for cycle
+                let state = (*position, *direction);
+                if !visited_states.insert(state) {
+                    return None; // Cycle found
+                }
             }
             Tile::Wall => {
-                *position = position.remove(direction);
-                direction.rotate_cw();
+                *position = *position - *direction;
+                direction.rotate_ccw();
             }
         }
-        *position = position.add(direction);
-    }
 
-    visited
+        *position = *position + *direction;
+    }
+    Some(visited_positions)
+}
+
+fn find_cyclic_paths(map: &Map, start: Point, direction: Point) -> usize {
+    let possible_obstructions =
+        walk_with_obstruction(map, &mut start.clone(), &mut direction.clone(), None)
+            .unwrap()
+            .iter()
+            .filter(|&&point| point != start)
+            .cloned()
+            .collect::<Vec<_>>();
+
+    possible_obstructions
+        .iter()
+        .map(|&obstruction| {
+            let mut new_start = start;
+            let mut new_direction = direction;
+            walk_with_obstruction(map, &mut new_start, &mut new_direction, Some(obstruction))
+        })
+        .filter(|visited| visited.is_none())
+        .count()
 }
 
 #[cfg(test)]
@@ -137,18 +179,18 @@ mod tests {
         let (map, start, direction) = parse_input(input);
         assert_eq!(map.len(), 10);
         assert_eq!(start, Point::new(4, 6));
-        assert_eq!(direction, Point::new(0, 1));
+        assert_eq!(direction, Point::new(0, -1));
     }
 
     #[test]
     fn test_part_one() {
         let result = part_one(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, None);
+        assert_eq!(result, Some(41));
     }
 
     #[test]
     fn test_part_two() {
         let result = part_two(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, None);
+        assert_eq!(result, Some(6));
     }
 }

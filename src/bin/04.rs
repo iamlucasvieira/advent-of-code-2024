@@ -18,7 +18,7 @@ pub fn part_two(input: &str) -> Option<u32> {
 fn parse_input(input: &str) -> Vec<Vec<char>> {
     let board = input
         .lines()
-        .map(|line| line.chars().map(|c| c).collect::<Vec<char>>())
+        .map(|line| line.chars().collect::<Vec<char>>())
         .collect();
     board
 }
@@ -39,19 +39,19 @@ fn find_words(board: Vec<Vec<char>>) -> HashMap<String, u32> {
 
             // Vertical
             if y + 4 <= rows {
-                let word = (0..4).map(|k| board[y + k][x].clone()).collect();
+                let word = (0..4).map(|k| board[y + k][x]).collect();
                 *map.entry(word).or_insert(0) += 1;
             }
 
             // Diagonal
             if y + 4 <= rows && x + 4 <= cols {
-                let word = (0..4).map(|k| board[y + k][x + k].clone()).collect();
+                let word = (0..4).map(|k| board[y + k][x + k]).collect();
                 *map.entry(word).or_insert(0) += 1;
             }
 
             // Opposite Diagonal
             if y + 4 <= rows && x >= 3 {
-                let word = (0..4).map(|k| board[y + k][x - k].clone()).collect();
+                let word = (0..4).map(|k| board[y + k][x - k]).collect();
                 *map.entry(word).or_insert(0) += 1;
             }
         }
